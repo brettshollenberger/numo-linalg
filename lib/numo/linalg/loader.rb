@@ -159,16 +159,13 @@ module Numo
         # Load Accelerate's BLAS
         blas_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libBLAS.dylib"
         puts "Attempting to load BLAS from: #{blas_path}" if $DEBUG
-        # blas = Fiddle.dlopen(blas_path)
         blas = dlopen(Fiddle, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
         blas = dlopen(Blas, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
         
         # Load Accelerate's LAPACK
         lapack_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libLAPACK.dylib"
         puts "Attempting to load LAPACK from: #{lapack_path}" if $DEBUG
-        # lapack = Fiddle.dlopen(lapack_path)
         lapack = dlopen(Fiddle, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
-        # lapack = dlopen(Lapack, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
         
         # Load custom LAPACKE if available
         if custom_lapacke_exists

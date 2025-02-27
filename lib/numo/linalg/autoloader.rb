@@ -43,7 +43,7 @@ module Numo
         accelerate_libs = find_accelerate_libs if apple_arm?
 
         @@libs = nil
-        if apple_arm? && !accelerate_libs.empty?
+        if apple_arm? && !accelerate_libs.nil?
           open_accelerate_libs(accelerate_libs)
           @@libs = accelerate_libs
           'accelerate'
@@ -172,23 +172,26 @@ module Numo
       end
 
       def find_accelerate_libs
-        lib_names = %w[Accelerate]
-        libs = []
+        # Check if we're on macOS
+        return nil unless RUBY_PLATFORM =~ /darwin/
+        
+        # Check for Accelerate framework
+        blas_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libBLAS.dylib"
+        lapack_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libLAPACK.dylib"
         
         # Check for custom LAPACKE library
         lapacke_path = File.expand_path("../../../ext/lapacke_install/lib/liblapacke.dylib", __dir__)
-        custom_lapacke_exists = File.exist?(lapacke_path)
         
-        # Add Accelerate framework
-        lib_names.each do |l|
-          path = "/System/Library/Frameworks/#{l}.framework/#{l}"
-          libs << path if File.exist?(path)
+        # Return paths if they exist
+        if File.exist?(blas_path) && File.exist?(lapack_path)
+          if File.exist?(lapacke_path)
+            return [blas_path, lapack_path, lapacke_path]
+          else
+            return [blas_path, lapack_path]
+          end
         end
         
-        # Add custom LAPACKE if it exists
-        libs << lapacke_path if custom_lapacke_exists
-        
-        libs
+        nil
       end
 
       def open_mkl_libs(mkl_libs)
@@ -218,33 +221,9 @@ module Numo
         Numo::Linalg::Lapack.dlopen(lapack_libs[:lapacke])
       end
 
-      def open_accelerate_libs(accelerate_libs)
-        libs = []
-        
-        # Load Accelerate's BLAS
-        blas_path = '/System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/libBLAS.dylib'
-        blas = Fiddle.dlopen(blas_path)
-        Numo::Linalg::Blas.dlopen(blas_path)
-        libs << blas
-        
-        # Load Accelerate's LAPACK
-        lapack_path = '/System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/libLAPACK.dylib'
-        lapack = Fiddle.dlopen(lapack_path)
-        Numo::Linalg::Lapack.dlopen(lapack_path)
-        libs << lapack
-        
-        # Check for custom LAPACKE
-        lapacke_path = File.expand_path("../../../ext/lapacke_install/lib/liblapacke.dylib", __dir__)
-        if File.exist?(lapacke_path)
-          begin
-            lapacke = Fiddle.dlopen(lapacke_path)
-            libs << lapacke
-          rescue Fiddle::DLError => e
-            warn "Warning: Custom LAPACKE exists but could not be loaded: #{e.message}"
-          end
-        end
-        
-        libs
+      def open_accelerate_libs(paths)
+        # Load the Accelerate libraries
+        Numo::Linalg::Loader.load_accelerate
       end
 
       private_class_method :detect_library_extension,
