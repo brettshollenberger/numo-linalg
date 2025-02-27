@@ -147,35 +147,51 @@ module Numo
         false
       end
 
-      def load_accelerate(exc: true)
-        begin
-          # Load BLAS and LAPACK from vecLib framework
-          blas_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libBLAS.dylib"
-          lapack_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libLAPACK.dylib"
+      def self.load_accelerate(exc: true)
+        puts "Attempting to load Accelerate framework..." if $DEBUG
 
-          f_blas = dlopen(Fiddle, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
-          f_lapack = dlopen(Fiddle, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
+        # Check if we have a custom LAPACKE library built for Accelerate
+        lapacke_path = File.expand_path("../../../ext/lapacke_install/lib/liblapacke.dylib", __dir__)
+        puts "Checking for custom LAPACKE at: #{lapacke_path}" if $DEBUG
+        custom_lapacke_exists = File.exist?(lapacke_path)
+        puts "Custom LAPACKE exists: #{custom_lapacke_exists}" if $DEBUG
 
-          f_blas = dlopen(Blas, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
-          f_lapack = dlopen(Lapack, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
-
-          @@libs = [f_blas, f_lapack]
-
-          # Set a flag to indicate we're using Accelerate without LAPACKE
-          @@using_accelerate_without_lapacke = true
-
-          if $DEBUG
-            $stderr.puts "Numo::Linalg: use Apple Accelerate framework (#{f_blas}, #{f_lapack})"
-            $stderr.puts "Note: Some advanced LAPACK functions may not be available as Accelerate lacks LAPACKE interface"
+        # Load Accelerate's BLAS
+        blas_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libBLAS.dylib"
+        puts "Attempting to load BLAS from: #{blas_path}" if $DEBUG
+        # blas = Fiddle.dlopen(blas_path)
+        blas = dlopen(Fiddle, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
+        blas = dlopen(Blas, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
+        
+        # Load Accelerate's LAPACK
+        lapack_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libLAPACK.dylib"
+        puts "Attempting to load LAPACK from: #{lapack_path}" if $DEBUG
+        # lapack = Fiddle.dlopen(lapack_path)
+        lapack = dlopen(Fiddle, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
+        # lapack = dlopen(Lapack, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
+        
+        # Load custom LAPACKE if available
+        if custom_lapacke_exists
+          puts "Loading custom LAPACKE from: #{lapacke_path}" if $DEBUG
+          begin
+            lapacke = Fiddle.dlopen(lapacke_path)
+            lapacke = dlopen(Lapack, "liblapacke", lapacke_path.sub(/\/liblapacke\.dylib$/, ""))
+            puts "Successfully loaded custom LAPACKE library" if $DEBUG
+            @@libs = [blas_path, lapack_path, lapacke_path]
+            return [blas, lapack, lapacke]
+          rescue Fiddle::DLError => e
+            puts "Error loading custom LAPACKE: #{e.message}" if $DEBUG
+            # Fall back to Accelerate without LAPACKE
           end
-          return true
-        rescue => e
-          $stderr.puts "Error loading Accelerate: #{e.message}" if $DEBUG
         end
-        if exc
-          raise RuntimeError, "cannot find Apple Accelerate framework"
-        end
-        false
+        
+        # If we get here, either custom LAPACKE doesn't exist or failed to load
+        puts "Successfully loaded BLAS and LAPACK from vecLib framework" if $DEBUG
+        puts "Note: Some advanced LAPACK functions may not be available as Accelerate lacks LAPACKE interface" if $DEBUG
+        puts "Run ./build_accelerate_lapacke.sh to build a custom LAPACKE library for full functionality" if $DEBUG
+        
+        @@libs = [blas_path, lapack_path]
+        [blas, lapack]
       end
 
       def using_accelerate_without_lapacke?
@@ -190,19 +206,27 @@ module Numo
         when /lapack|blas/i; return if load_lapack(exc: false)
         when /accelerate/i; return if load_accelerate(exc: false)
         else
-          return if load_accelerate(exc: false) if apple_arm?
+          # On Apple ARM, try Accelerate first
+          if apple_arm?
+            return if load_accelerate(exc: false)
+          end
+          
+          # Try other backends
           return if load_mkl(exc: false)
           return if load_openblas(exc: false)
           return if load_atlas(exc: false)
           return if load_lapack(exc: false)
+          
+          # If we're on Apple ARM and we've reached this point, try Accelerate again with exceptions enabled
+          if apple_arm?
+            return if load_accelerate(exc: true)
+          end
         end
         raise RuntimeError, "cannot find backend library for Numo::Linalg"
       end
 
       def apple_arm?
-        result = RUBY_PLATFORM =~ /arm64-darwin/
-        puts "Checking if Apple ARM: RUBY_PLATFORM=#{RUBY_PLATFORM}, result=#{result}"
-        result
+        RUBY_PLATFORM =~ /arm64-darwin/ ? true : false
       end
     end
   end
