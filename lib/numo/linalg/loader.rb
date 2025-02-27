@@ -147,21 +147,63 @@ module Numo
         false
       end
 
+      def load_accelerate(exc: true)
+        begin
+          # Load BLAS and LAPACK from vecLib framework
+          blas_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libBLAS.dylib"
+          lapack_path = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libLAPACK.dylib"
+
+          f_blas = dlopen(Fiddle, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
+          f_lapack = dlopen(Fiddle, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
+
+          f_blas = dlopen(Blas, "libBLAS", blas_path.sub(/\/libBLAS\.dylib$/, ""))
+          f_lapack = dlopen(Lapack, "libLAPACK", lapack_path.sub(/\/libLAPACK\.dylib$/, ""))
+
+          @@libs = [f_blas, f_lapack]
+
+          # Set a flag to indicate we're using Accelerate without LAPACKE
+          @@using_accelerate_without_lapacke = true
+
+          if $DEBUG
+            $stderr.puts "Numo::Linalg: use Apple Accelerate framework (#{f_blas}, #{f_lapack})"
+            $stderr.puts "Note: Some advanced LAPACK functions may not be available as Accelerate lacks LAPACKE interface"
+          end
+          return true
+        rescue => e
+          $stderr.puts "Error loading Accelerate: #{e.message}" if $DEBUG
+        end
+        if exc
+          raise RuntimeError, "cannot find Apple Accelerate framework"
+        end
+        false
+      end
+
+      def using_accelerate_without_lapacke?
+        @@using_accelerate_without_lapacke ||= false
+      end
+
       def load_library
         case BACKEND
-        when /mkl/i         ; return if load_mkl(exc:false)
-        when /^openblas/i   ; return if load_openblas(exc:false)
-        when /^atlas/i      ; return if load_atlas(exc:false)
-        when /lapack|blas/i ; return if load_lapack(exc:false)
+        when /mkl/i; return if load_mkl(exc: false)
+        when /^openblas/i; return if load_openblas(exc: false)
+        when /^atlas/i; return if load_atlas(exc: false)
+        when /lapack|blas/i; return if load_lapack(exc: false)
+        when /accelerate/i; return if load_accelerate(exc: false)
         else
-          return if load_mkl(exc:false)
-          return if load_openblas(exc:false)
-          return if load_atlas(exc:false)
-          return if load_lapack(exc:false)
+          return if load_accelerate(exc: false) if apple_arm?
+          return if load_mkl(exc: false)
+          return if load_openblas(exc: false)
+          return if load_atlas(exc: false)
+          return if load_lapack(exc: false)
         end
         raise RuntimeError, "cannot find backend library for Numo::Linalg"
       end
 
+      def apple_arm?
+        result = RUBY_PLATFORM =~ /arm64-darwin/
+        puts "Checking if Apple ARM: RUBY_PLATFORM=#{RUBY_PLATFORM}, result=#{result}"
+        result
+      end
     end
   end
 end

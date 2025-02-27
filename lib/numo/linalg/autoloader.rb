@@ -40,9 +40,14 @@ module Numo
         openblas_libs = find_openblas_libs([*base_dirs, *opt_dirs, *openblas_dirs])
         atlas_libs = find_atlas_libs([*base_dirs, *opt_dirs, *atlas_dirs, *lapacke_dirs])
         lapack_libs = find_lapack_libs([*base_dirs, *opt_dirs, *lapacke_dirs])
+        accelerate_libs = find_accelerate_libs if apple_arm?
 
         @@libs = nil
-        if !mkl_libs.value?(nil)
+        if apple_arm? && !accelerate_libs.value?(nil)
+          open_accelerate_libs(accelerate_libs)
+          @@libs = accelerate_libs.values.uniq
+          'accelerate'
+        elsif !mkl_libs.value?(nil)
           open_mkl_libs(mkl_libs)
           @@libs = mkl_libs.values
           'mkl'
@@ -65,7 +70,7 @@ module Numo
 
       def detect_library_extension
         # Ruby >= 2.5 provides SOEXT in rbconfig
-        so_ext = RbConfig::CONFIG["SOEXT"]
+        so_ext = RbConfig::CONFIG['SOEXT']
         return so_ext if so_ext
 
         return 'dll' if windows?
@@ -88,8 +93,12 @@ module Numo
         end
       end
 
+      def apple_arm?
+        RUBY_PLATFORM =~ /arm64-darwin/
+      end
+
       def select_dirs(dirs)
-        dirs.select!{|d| Dir.exist?(d)}
+        dirs.select! { |d| Dir.exist?(d) }
       end
 
       def find_libs(lib_names, lib_dirs)
@@ -162,6 +171,13 @@ module Numo
         lapack_libs
       end
 
+      def find_accelerate_libs
+        lib_names = %w[Accelerate]
+        lib_dirs = ['/System/Library/Frameworks']
+        accelerate_libs = find_libs(lib_names, lib_dirs)
+        accelerate_libs
+      end
+
       def open_mkl_libs(mkl_libs)
         Fiddle.dlopen(mkl_libs[:iomp5])
         Fiddle.dlopen(mkl_libs[:mkl_core])
@@ -189,9 +205,17 @@ module Numo
         Numo::Linalg::Lapack.dlopen(lapack_libs[:lapacke])
       end
 
+      def open_accelerate_libs(accelerate_libs)
+        Fiddle.dlopen(accelerate_libs[:Accelerate])
+        Numo::Linalg::Blas.dlopen(accelerate_libs[:Accelerate])
+        Numo::Linalg::Lapack.dlopen(accelerate_libs[:Accelerate])
+        # Load Accelerate-specific implementations
+        require 'numo/linalg/accelerate_impl'
+      end
+
       private_class_method :detect_library_extension,
-                           :find_libs, :find_mkl_libs, :find_openblas_libs, :find_atlas_libs, :find_lapack_libs,
-                           :open_mkl_libs, :open_openblas_libs, :open_atlas_libs, :open_lapack_libs
+                           :find_libs, :find_mkl_libs, :find_openblas_libs, :find_atlas_libs, :find_lapack_libs, :find_accelerate_libs,  
+                           :open_mkl_libs, :open_openblas_libs, :open_atlas_libs, :open_lapack_libs, :open_accelerate_libs
     end
   end
 end
